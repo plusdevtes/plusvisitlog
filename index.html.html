@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sales Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body {
+      background: linear-gradient(135deg, #e0f7fa, #b2ebf2);
+      font-family: 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #upload-container {
+      margin-bottom: 30px;
+      text-align: center;
+    }
+
+    .scorecards {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 30px;
+      width: 100%;
+      max-width: 900px;
+    }
+
+    .scorecard {
+      background: rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(10px);
+      border-radius: 12px;
+      padding: 20px 30px;
+      text-align: center;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+      flex: 1 1 200px;
+    }
+
+    .scorecard h2 {
+      margin: 0;
+      font-size: 28px;
+      color: #004d40;
+    }
+
+    .scorecard p {
+      margin-top: 8px;
+      font-size: 14px;
+      color: #004d40cc;
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(2, 40%);
+      gap: 30px;
+      justify-content: center;
+      width: 100%;
+    }
+
+    .chart-card {
+      backdrop-filter: blur(10px);
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+    }
+
+    input[type="file"] {
+      padding: 8px 12px;
+      background-color: #ffffffaa;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="upload-container">
+    <input type="file" id="fileInput" accept=".json" />
+  </div>
+
+  <div class="scorecards">
+    <div class="scorecard"><h2 id="totalVisits">--</h2><p>Total Visits</p></div>
+    <div class="scorecard"><h2 id="totalRounders">--</h2><p>Total Rounders</p></div>
+    <div class="scorecard"><h2 id="totalDistricts">--</h2><p>Total Districts</p></div>
+    <div class="scorecard"><h2 id="avgDuration">--</h2><p>Avg Visit Duration (mins)</p></div>
+  </div>
+
+  <div class="dashboard">
+    <div class="chart-card" id="visitsPerDay"></div>
+    <div class="chart-card" id="visitsByDistrict"></div>
+    <div class="chart-card" id="visitDurationDist"></div>
+    <div class="chart-card" id="avgVisitPerRounder"></div>
+  </div>
+
+  <script>
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const data = JSON.parse(event.target.result);
+        renderDashboard(data);
+      };
+      reader.readAsText(file);
+    });
+
+    function renderDashboard(data) {
+      const parseDate = dateStr => {
+        const [day, month, year] = dateStr.split('/');
+        return new Date(`${year}-${month}-${day}`);
+      };
+
+      const visitsByDay = {};
+      const visitsByDistrict = {};
+      const durationDist = [];
+      const rounderVisitMap = {};
+      const uniqueRounders = new Set();
+      const uniqueDistricts = new Set();
+      let totalDuration = 0;
+
+      data.forEach(row => {
+        const date = parseDate(row['Visit Date']).toLocaleDateString('en-GB');
+        const district = row['District'];
+        const rounder = row['Rounder ID'];
+
+        visitsByDay[date] = (visitsByDay[date] || 0) + 1;
+        visitsByDistrict[district] = (visitsByDistrict[district] || 0) + 1;
+        uniqueRounders.add(rounder);
+        uniqueDistricts.add(district);
+
+        const inTime = new Date(`1970-01-01T${row['Check-In Time']}:00`);
+        const outTime = new Date(`1970-01-01T${row['Check-Out Time']}:00`);
+        const duration = (outTime - inTime) / 60000;
+        if (!isNaN(duration)) {
+          durationDist.push(duration);
+          totalDuration += duration;
+        }
+
+        const dayKey = `${rounder}-${date}`;
+        rounderVisitMap[dayKey] = (rounderVisitMap[dayKey] || 0) + 1;
+      });
+
+      // Scorecards
+      document.getElementById('totalVisits').textContent = data.length;
+      document.getElementById('totalRounders').textContent = uniqueRounders.size;
+      document.getElementById('totalDistricts').textContent = uniqueDistricts.size;
+      document.getElementById('avgDuration').textContent = durationDist.length ? (totalDuration / durationDist.length).toFixed(1) : '0';
+
+      // Charts
+      Plotly.newPlot('visitsPerDay', [{
+        x: Object.keys(visitsByDay),
+        y: Object.values(visitsByDay),
+        type: 'bar',
+        marker: { color: '#007acc' }
+      }], { title: 'Visits per Day' });
+
+      Plotly.newPlot('visitsByDistrict', [{
+        labels: Object.keys(visitsByDistrict),
+        values: Object.values(visitsByDistrict),
+        type: 'pie'
+      }], { title: 'Visits by District' });
+
+      Plotly.newPlot('visitDurationDist', [{
+        x: durationDist,
+        type: 'histogram',
+        marker: { color: '#0097a7' }
+      }], { title: 'Visit Duration Distribution' });
+
+      const rounderAgg = {};
+      Object.entries(rounderVisitMap).forEach(([key, val]) => {
+        const rounder = key.split('-')[0];
+        rounderAgg[rounder] = rounderAgg[rounder] || [];
+        rounderAgg[rounder].push(val);
+      });
+
+      const avgRounder = Object.entries(rounderAgg).map(([rounder, visits]) => {
+        return {
+          rounder,
+          avg: (visits.reduce((a, b) => a + b, 0) / visits.length).toFixed(2)
+        };
+      });
+
+      Plotly.newPlot('avgVisitPerRounder', [{
+        x: avgRounder.map(r => r.rounder),
+        y: avgRounder.map(r => r.avg),
+        type: 'bar',
+        marker: { color: '#006064' }
+      }], { title: 'Average Visits per Rounder per Day' });
+    }
+  </script>
+
+</body>
+</html>
